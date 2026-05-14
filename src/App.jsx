@@ -75,6 +75,8 @@ export default function App() {
   const editedAnswerRef = useRef(false);
   const lastEditedValueRef = useRef('');
   const queuedNextQuestionIdRef = useRef(null);
+  const suppressNextEnterRef = useRef(false);
+  const enterGuardTimerRef = useRef(null);
 
   const wrongQuestions = questions.filter((question) => records[question.id]?.reviewNeeded);
   const visibleQuestions = mode === 'wrongOnly' ? wrongQuestions : questions;
@@ -102,6 +104,15 @@ export default function App() {
     }
   }, [records]);
 
+  useEffect(
+    () => () => {
+      if (enterGuardTimerRef.current !== null && typeof window !== 'undefined') {
+        window.clearTimeout(enterGuardTimerRef.current);
+      }
+    },
+    []
+  );
+
   useEffect(() => {
     if (isAnswerLocked) {
       return;
@@ -126,6 +137,11 @@ export default function App() {
       editedAnswerRef.current = false;
       lastEditedValueRef.current = '';
       queuedNextQuestionIdRef.current = null;
+      suppressNextEnterRef.current = false;
+      if (enterGuardTimerRef.current !== null && typeof window !== 'undefined') {
+        window.clearTimeout(enterGuardTimerRef.current);
+        enterGuardTimerRef.current = null;
+      }
       setIsComposing(false);
       setIsAnswerLocked(false);
       return;
@@ -140,6 +156,11 @@ export default function App() {
     editedAnswerRef.current = false;
     lastEditedValueRef.current = reviewSeed ?? '';
     queuedNextQuestionIdRef.current = null;
+    suppressNextEnterRef.current = false;
+    if (enterGuardTimerRef.current !== null && typeof window !== 'undefined') {
+      window.clearTimeout(enterGuardTimerRef.current);
+      enterGuardTimerRef.current = null;
+    }
     setIsComposing(false);
     setIsAnswerLocked(false);
   }, [currentQuestion?.id, mode]);
@@ -196,6 +217,24 @@ export default function App() {
     setMode(nextMode);
   };
 
+  const guardImmediateEnterAfterLock = () => {
+    suppressNextEnterRef.current = true;
+
+    if (typeof window === 'undefined') {
+      suppressNextEnterRef.current = false;
+      return;
+    }
+
+    if (enterGuardTimerRef.current !== null) {
+      window.clearTimeout(enterGuardTimerRef.current);
+    }
+
+    enterGuardTimerRef.current = window.setTimeout(() => {
+      suppressNextEnterRef.current = false;
+      enterGuardTimerRef.current = null;
+    }, 0);
+  };
+
   const handleAnswerChange = (nextValue, composing = false) => {
     if (!currentQuestion || isAnswerLocked) {
       return;
@@ -219,6 +258,7 @@ export default function App() {
       queuedNextQuestionIdRef.current =
         mode === 'wrongOnly' ? getSiblingQuestionId(visibleQuestions, currentQuestion.id) : null;
       successLoggedRef.current = true;
+      guardImmediateEnterAfterLock();
       setIsAnswerLocked(true);
       commitAttempt(currentQuestion.id, 'correct', nextValue, {
         clearReview: true
@@ -285,6 +325,11 @@ export default function App() {
     editedAnswerRef.current = false;
     lastEditedValueRef.current = '';
     queuedNextQuestionIdRef.current = null;
+    suppressNextEnterRef.current = false;
+    if (enterGuardTimerRef.current !== null && typeof window !== 'undefined') {
+      window.clearTimeout(enterGuardTimerRef.current);
+      enterGuardTimerRef.current = null;
+    }
     setIsComposing(false);
     setIsAnswerLocked(false);
   };
@@ -328,6 +373,10 @@ export default function App() {
           onNext={handleNext}
           onEnter={() => {
             if (isComposing) {
+              return;
+            }
+
+            if (suppressNextEnterRef.current) {
               return;
             }
 
