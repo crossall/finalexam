@@ -220,6 +220,10 @@ export default function App() {
     }
   };
 
+  const handleNext = () => {
+    handleMove(1);
+  };
+
   const handleReset = () => {
     if (!window.confirm('학습 기록을 모두 초기화할까요?')) {
       return;
@@ -270,14 +274,14 @@ export default function App() {
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}
           onPrev={() => handleMove(-1)}
-          onNext={() => handleMove(1)}
+          onNext={handleNext}
           onEnter={() => {
             if (isComposing) {
               return;
             }
 
             if (liveState === 'correct') {
-              handleMove(1);
+              handleNext();
             }
           }}
         />
