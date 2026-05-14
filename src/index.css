@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #102033;
+  font-family: 'Pretendard Variable', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(231, 241, 255, 0.95), transparent 36%),
+    radial-gradient(circle at bottom right, rgba(226, 123, 91, 0.22), transparent 28%),
+    linear-gradient(135deg, #fffaf3 0%, #f2f7ff 45%, #eef5f1 100%);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(226, 123, 91, 0.22);
+}
+
+@layer base {
+  * {
+    @apply border-slate-200;
+  }
+
+  button,
+  input {
+    @apply outline-none;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply rounded-[28px] border border-white/70 bg-white/80 shadow-float backdrop-blur-xl;
+  }
+
+  .stat-card {
+    @apply rounded-2xl border border-slate-200/70 bg-slate-50/70 p-4;
+  }
+
+  .soft-button-primary {
+    @apply inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition duration-200 hover:bg-slate-700;
+  }
+
+  .soft-button-secondary {
+    @apply inline-flex items-center justify-center rounded-full border border-slate-200 bg-white/80 px-4 py-2 text-sm font-semibold text-slate-700 transition duration-200 hover:border-slate-300 hover:bg-white;
+  }
+
+  .soft-button-ghost {
+    @apply inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-semibold text-slate-500 transition duration-200 hover:bg-slate-100 hover:text-slate-700;
+  }
+
+  .answer-input {
+    @apply w-full rounded-3xl border border-slate-200 bg-white px-5 py-4 text-lg font-semibold text-ink shadow-sm transition duration-200 placeholder:text-slate-400 focus:border-coral focus:ring-4 focus:ring-coral/10;
+  }
+
+  .meta-pill {
+    @apply inline-flex items-center rounded-full border border-slate-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500;
+  }
+}
+

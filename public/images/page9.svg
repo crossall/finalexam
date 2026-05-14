@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 520" role="img" aria-labelledby="title desc">
+  <title id="title">맞춤형 한국어교육 예시 이미지</title>
+  <desc id="desc">페이지 9 학습 자료를 대신하는 샘플 도식</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#EAF4FF" />
+      <stop offset="100%" stop-color="#FFF0E5" />
+    </linearGradient>
+  </defs>
+  <rect width="800" height="520" rx="32" fill="url(#bg)" />
+  <rect x="56" y="56" width="688" height="408" rx="28" fill="#FFFFFF" stroke="#D6E3F5" stroke-width="4" />
+  <circle cx="170" cy="180" r="70" fill="#19443C" opacity="0.9" />
+  <circle cx="400" cy="180" r="70" fill="#E27B5B" opacity="0.9" />
+  <circle cx="630" cy="180" r="70" fill="#102033" opacity="0.9" />
+  <path d="M240 180h90M470 180h90" stroke="#B8C9DB" stroke-width="12" stroke-linecap="round" />
+  <text x="400" y="320" text-anchor="middle" font-family="sans-serif" font-size="38" font-weight="700" fill="#102033">
+    바로지원 한국어 교실
+  </text>
+  <text x="400" y="376" text-anchor="middle" font-family="sans-serif" font-size="22" fill="#486173">
+    public/images 경로의 샘플 이미지
+  </text>
+</svg>
+
