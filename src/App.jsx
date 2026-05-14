@@ -4,7 +4,7 @@ import ProgressPanel from './components/ProgressPanel';
 import QuizCard from './components/QuizCard';
 import WrongAnswerList from './components/WrongAnswerList';
 import questions from './data/questions.json';
-import { getLiveAnswerState } from './utils/answers';
+import { getLiveAnswerState, normalizeAnswer } from './utils/answers';
 
 const STORAGE_KEY = 'finalexam-memory-quiz-progress-v1';
 
@@ -70,22 +70,31 @@ export default function App() {
   const [activeQuestionId, setActiveQuestionId] = useState(questions[0]?.id ?? null);
   const [draftAnswer, setDraftAnswer] = useState('');
   const [isComposing, setIsComposing] = useState(false);
-  const mistakeLoggedRef = useRef(false);
+  const [isAnswerLocked, setIsAnswerLocked] = useState(false);
   const successLoggedRef = useRef(false);
+  const editedAnswerRef = useRef(false);
+  const lastEditedValueRef = useRef('');
+  const queuedNextQuestionIdRef = useRef(null);
 
   const wrongQuestions = questions.filter((question) => records[question.id]?.reviewNeeded);
   const visibleQuestions = mode === 'wrongOnly' ? wrongQuestions : questions;
-  const currentQuestion =
-    visibleQuestions.find((question) => question.id === activeQuestionId) ?? visibleQuestions[0] ?? null;
+  const currentQuestion = questions.find((question) => question.id === activeQuestionId) ?? visibleQuestions[0] ?? null;
   const currentIndex = currentQuestion
     ? visibleQuestions.findIndex((question) => question.id === currentQuestion.id)
     : -1;
   const currentRecord = currentQuestion ? records[currentQuestion.id] : createEmptyRecord();
   const liveState = currentQuestion
-    ? isComposing && draftAnswer
-      ? 'partial'
-      : getLiveAnswerState(draftAnswer, currentQuestion)
+    ? isAnswerLocked
+      ? 'correct'
+      : isComposing && draftAnswer
+        ? 'composing'
+        : getLiveAnswerState(draftAnswer, currentQuestion)
     : 'idle';
+  const progressIndex = currentIndex >= 0 ? currentIndex : 0;
+  const hasNext =
+    isAnswerLocked && mode === 'wrongOnly'
+      ? true
+      : currentIndex >= 0 && currentIndex < visibleQuestions.length - 1;
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -94,6 +103,10 @@ export default function App() {
   }, [records]);
 
   useEffect(() => {
+    if (isAnswerLocked) {
+      return;
+    }
+
     if (!visibleQuestions.length) {
       if (activeQuestionId !== null) {
         setActiveQuestionId(null);
@@ -104,14 +117,17 @@ export default function App() {
     if (!visibleQuestions.some((question) => question.id === activeQuestionId)) {
       setActiveQuestionId(visibleQuestions[0].id);
     }
-  }, [activeQuestionId, visibleQuestions]);
+  }, [activeQuestionId, isAnswerLocked, visibleQuestions]);
 
   useEffect(() => {
     if (!currentQuestion) {
       setDraftAnswer('');
-      mistakeLoggedRef.current = false;
       successLoggedRef.current = false;
+      editedAnswerRef.current = false;
+      lastEditedValueRef.current = '';
+      queuedNextQuestionIdRef.current = null;
       setIsComposing(false);
+      setIsAnswerLocked(false);
       return;
     }
 
@@ -120,9 +136,12 @@ export default function App() {
       : '';
 
     setDraftAnswer(reviewSeed ?? '');
-    mistakeLoggedRef.current = false;
     successLoggedRef.current = false;
+    editedAnswerRef.current = false;
+    lastEditedValueRef.current = reviewSeed ?? '';
+    queuedNextQuestionIdRef.current = null;
     setIsComposing(false);
+    setIsAnswerLocked(false);
   }, [currentQuestion?.id, mode]);
 
   const commitAttempt = (questionId, status, answerText, options = {}) => {
@@ -158,16 +177,33 @@ export default function App() {
     });
   };
 
+  const finalizeCurrentAttempt = () => {
+    if (!currentQuestion || isAnswerLocked || successLoggedRef.current || !editedAnswerRef.current) {
+      return;
+    }
+
+    const attemptValue = draftAnswer || lastEditedValueRef.current;
+
+    if (!normalizeAnswer(attemptValue)) {
+      return;
+    }
+
+    commitAttempt(currentQuestion.id, 'wrong', attemptValue);
+  };
+
   const handleModeChange = (nextMode) => {
+    finalizeCurrentAttempt();
     setMode(nextMode);
   };
 
   const handleAnswerChange = (nextValue, composing = false) => {
-    if (!currentQuestion) {
+    if (!currentQuestion || isAnswerLocked) {
       return;
     }
 
     setDraftAnswer(nextValue);
+    editedAnswerRef.current = true;
+    lastEditedValueRef.current = nextValue;
 
     if (composing) {
       return;
@@ -179,23 +215,14 @@ export default function App() {
 
     const nextState = getLiveAnswerState(nextValue, currentQuestion);
 
-    if (nextState === 'incorrect' && !mistakeLoggedRef.current) {
-      mistakeLoggedRef.current = true;
-      commitAttempt(currentQuestion.id, 'wrong', nextValue);
-    }
-
     if (nextState === 'correct' && !successLoggedRef.current) {
-      const nextReviewTarget =
-        mode === 'wrongOnly' ? getSiblingQuestionId(visibleQuestions, currentQuestion.id) : currentQuestion.id;
-
+      queuedNextQuestionIdRef.current =
+        mode === 'wrongOnly' ? getSiblingQuestionId(visibleQuestions, currentQuestion.id) : null;
       successLoggedRef.current = true;
+      setIsAnswerLocked(true);
       commitAttempt(currentQuestion.id, 'correct', nextValue, {
-        clearReview: mode === 'wrongOnly'
+        clearReview: true
       });
-
-      if (mode === 'wrongOnly') {
-        setActiveQuestionId(nextReviewTarget);
-      }
     }
   };
 
@@ -208,19 +235,39 @@ export default function App() {
     handleAnswerChange(finalValue);
   };
 
+  const moveToQuestion = (nextQuestionId) => {
+    if (!isAnswerLocked) {
+      finalizeCurrentAttempt();
+    }
+
+    setActiveQuestionId(nextQuestionId);
+  };
+
   const handleMove = (offset) => {
-    if (!currentQuestion) {
+    if (!currentQuestion || currentIndex < 0) {
       return;
     }
 
     const target = visibleQuestions[currentIndex + offset];
 
     if (target) {
-      setActiveQuestionId(target.id);
+      moveToQuestion(target.id);
     }
   };
 
   const handleNext = () => {
+    if (!currentQuestion) {
+      return;
+    }
+
+    if (isAnswerLocked) {
+      const nextQuestionId =
+        mode === 'wrongOnly' ? queuedNextQuestionIdRef.current : visibleQuestions[currentIndex + 1]?.id ?? null;
+
+      moveToQuestion(nextQuestionId ?? null);
+      return;
+    }
+
     handleMove(1);
   };
 
@@ -234,9 +281,12 @@ export default function App() {
     setMode('all');
     setActiveQuestionId(questions[0]?.id ?? null);
     setDraftAnswer('');
-    mistakeLoggedRef.current = false;
     successLoggedRef.current = false;
+    editedAnswerRef.current = false;
+    lastEditedValueRef.current = '';
+    queuedNextQuestionIdRef.current = null;
     setIsComposing(false);
+    setIsAnswerLocked(false);
   };
 
   const solvedCount = questions.filter((question) => records[question.id]?.solved).length;
@@ -253,7 +303,7 @@ export default function App() {
         wrongCount={wrongCount}
         accuracy={accuracy}
         attempts={attempts}
-        currentIndex={currentIndex}
+        currentIndex={progressIndex}
         visibleCount={visibleQuestions.length}
         mode={mode}
         onReset={handleReset}
@@ -267,8 +317,9 @@ export default function App() {
           value={draftAnswer}
           liveState={liveState}
           record={currentRecord}
+          isAnswerLocked={isAnswerLocked}
           hasPrev={currentIndex > 0}
-          hasNext={currentIndex < visibleQuestions.length - 1}
+          hasNext={hasNext}
           mode={mode}
           onChange={handleAnswerChange}
           onCompositionStart={handleCompositionStart}
@@ -280,7 +331,7 @@ export default function App() {
               return;
             }
 
-            if (liveState === 'correct') {
+            if (isAnswerLocked) {
               handleNext();
             }
           }}
@@ -307,7 +358,7 @@ export default function App() {
             return;
           }
 
-          setActiveQuestionId(questionId);
+          moveToQuestion(questionId);
         }}
       />
     </main>

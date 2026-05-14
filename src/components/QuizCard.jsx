@@ -12,9 +12,14 @@ const stateStyles = {
     caption: '정답을 입력하면 즉시 판정합니다.',
     shell: 'border-slate-200 bg-white/80 text-slate-500'
   },
+  composing: {
+    badge: '조합 중',
+    caption: '한글 입력 조합 중입니다. 글자가 완성되면 판정합니다.',
+    shell: 'border-slate-200 bg-slate-50 text-slate-600'
+  },
   partial: {
-    badge: '입력 중',
-    caption: '지금 흐름은 맞습니다. 계속 입력하세요.',
+    badge: '부분 일치',
+    caption: '정답의 앞부분과 일치합니다.',
     shell: 'border-sky-200 bg-sky-50 text-sky-700'
   },
   incorrect: {
@@ -24,9 +29,37 @@ const stateStyles = {
   },
   correct: {
     badge: '정답',
-    caption: '정답으로 기록했습니다. 다음 문제로 넘어갈 수 있습니다.',
+    caption: '정답입니다. Enter 또는 다음 문제 버튼으로 이동하세요.',
     shell: 'border-emerald-200 bg-emerald-50 text-emerald-700'
   }
+};
+
+const BLANK_PATTERN = /(_{2,}|\*{2,})/;
+
+const renderSolvedSentence = (sentence, answer) => {
+  const match = sentence.match(BLANK_PATTERN);
+
+  if (!match) {
+    return (
+      <>
+        {sentence}{' '}
+        <span className="rounded-xl bg-emerald-100 px-2 py-1 text-emerald-700">{answer}</span>
+      </>
+    );
+  }
+
+  const token = match[0];
+  const startIndex = sentence.indexOf(token);
+  const before = sentence.slice(0, startIndex);
+  const after = sentence.slice(startIndex + token.length);
+
+  return (
+    <>
+      {before}
+      <span className="rounded-xl bg-emerald-100 px-2 py-1 text-emerald-700">{answer}</span>
+      {after}
+    </>
+  );
 };
 
 export default function QuizCard({
@@ -34,6 +67,7 @@ export default function QuizCard({
   value,
   liveState,
   record,
+  isAnswerLocked,
   hasPrev,
   hasNext,
   mode,
@@ -64,7 +98,7 @@ export default function QuizCard({
             Fill In The Blank
           </p>
           <h2 className="mt-3 text-2xl font-black leading-snug text-ink md:text-[2rem]">
-            {question.sentence}
+            {isAnswerLocked ? renderSolvedSentence(question.sentence, question.answer) : question.sentence}
           </h2>
 
           <div className="mt-6 rounded-3xl border border-slate-200/70 bg-sand/50 p-5">
@@ -77,6 +111,7 @@ export default function QuizCard({
               autoFocus
               type="text"
               value={value}
+              readOnly={isAnswerLocked}
               onChange={(event) => onChange(event.target.value, event.nativeEvent.isComposing)}
               onCompositionStart={onCompositionStart}
               onCompositionEnd={(event) => onCompositionEnd(event.currentTarget.value)}
@@ -85,8 +120,8 @@ export default function QuizCard({
                   onEnter();
                 }
               }}
-              placeholder="정답을 입력하세요"
-              className="answer-input"
+              placeholder={isAnswerLocked ? '정답 확인 완료' : '정답을 입력하세요'}
+              className={`answer-input ${isAnswerLocked ? 'cursor-default bg-emerald-50 text-emerald-700' : ''}`}
             />
           </div>
 
