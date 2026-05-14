@@ -9,7 +9,7 @@ const difficultyText = {
 const stateStyles = {
   idle: {
     badge: '준비',
-    caption: '정답을 입력하면 즉시 판정합니다.',
+    caption: '답을 입력한 뒤 Enter 또는 정답 확인 버튼으로 제출하세요.',
     shell: 'border-slate-200 bg-white/80 text-slate-500'
   },
   composing: {
@@ -22,28 +22,42 @@ const stateStyles = {
     caption: '정답의 앞부분과 일치합니다.',
     shell: 'border-sky-200 bg-sky-50 text-sky-700'
   },
-  incorrect: {
-    badge: '오답 감지',
+  mismatch: {
+    badge: '불일치',
     caption: '현재 입력은 정답 패턴과 다릅니다.',
     shell: 'border-rose-200 bg-rose-50 text-rose-700'
   },
+  matched: {
+    badge: '정답 일치',
+    caption: '정답과 일치합니다. Enter 또는 정답 확인 버튼으로 확정하세요.',
+    shell: 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  },
   correct: {
     badge: '정답',
-    caption: '정답입니다. Enter 또는 다음 문제 버튼으로 이동하세요.',
+    caption: '정답입니다. 다시 Enter 또는 다음 문제 버튼을 누르면 이동합니다.',
     shell: 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  },
+  incorrect: {
+    badge: '오답',
+    caption: '오답입니다. 정답을 확인한 뒤 다시 Enter 또는 다음 문제 버튼을 누르세요.',
+    shell: 'border-rose-200 bg-rose-50 text-rose-700'
   }
 };
 
 const BLANK_PATTERN = /(_{2,}|\*{2,})/;
 
-const renderSolvedSentence = (sentence, answer) => {
+const renderSolvedSentence = (sentence, answer, tone) => {
+  const answerClass =
+    tone === 'incorrect'
+      ? 'rounded-xl bg-rose-100 px-2 py-1 text-rose-700'
+      : 'rounded-xl bg-emerald-100 px-2 py-1 text-emerald-700';
   const match = sentence.match(BLANK_PATTERN);
 
   if (!match) {
     return (
       <>
         {sentence}{' '}
-        <span className="rounded-xl bg-emerald-100 px-2 py-1 text-emerald-700">{answer}</span>
+        <span className={answerClass}>{answer}</span>
       </>
     );
   }
@@ -56,7 +70,7 @@ const renderSolvedSentence = (sentence, answer) => {
   return (
     <>
       {before}
-      <span className="rounded-xl bg-emerald-100 px-2 py-1 text-emerald-700">{answer}</span>
+      <span className={answerClass}>{answer}</span>
       {after}
     </>
   );
@@ -67,9 +81,11 @@ export default function QuizCard({
   value,
   liveState,
   record,
+  submissionResult,
   isAnswerLocked,
   hasPrev,
   hasNext,
+  primaryActionLabel,
   mode,
   onChange,
   onCompositionStart,
@@ -79,6 +95,10 @@ export default function QuizCard({
   onEnter
 }) {
   const state = stateStyles[liveState];
+  const lockedInputClass =
+    submissionResult?.status === 'incorrect'
+      ? 'cursor-default bg-rose-50 text-rose-700'
+      : 'cursor-default bg-emerald-50 text-emerald-700';
 
   return (
     <section className="glass-panel p-6">
@@ -98,7 +118,9 @@ export default function QuizCard({
             Fill In The Blank
           </p>
           <h2 className="mt-3 text-2xl font-black leading-snug text-ink md:text-[2rem]">
-            {isAnswerLocked ? renderSolvedSentence(question.sentence, question.answer) : question.sentence}
+            {isAnswerLocked
+              ? renderSolvedSentence(question.sentence, question.answer, submissionResult?.status)
+              : question.sentence}
           </h2>
 
           <div className="mt-6 rounded-3xl border border-slate-200/70 bg-sand/50 p-5">
@@ -121,7 +143,7 @@ export default function QuizCard({
                 }
               }}
               placeholder={isAnswerLocked ? '정답 확인 완료' : '정답을 입력하세요'}
-              className={`answer-input ${isAnswerLocked ? 'cursor-default bg-emerald-50 text-emerald-700' : ''}`}
+              className={`answer-input ${isAnswerLocked ? lockedInputClass : ''}`}
             />
           </div>
 
@@ -133,9 +155,17 @@ export default function QuizCard({
               <p className="text-sm font-medium">{state.caption}</p>
             </div>
 
+            {submissionResult?.status === 'incorrect' ? (
+              <p className="mt-3 text-sm font-medium text-rose-700">
+                입력한 답: {submissionResult.submittedAnswer || '빈칸'} / 정답: {question.answer}
+              </p>
+            ) : null}
+
             {record.reviewNeeded && (
               <p className="mt-3 text-sm">
-                {mode === 'wrongOnly'
+                {submissionResult?.status === 'correct'
+                  ? '이 문제는 다음 이동 시 오답 복습 목록에서 제거됩니다.'
+                  : mode === 'wrongOnly'
                   ? '이 문제를 맞히면 오답 복습 목록에서 제거됩니다.'
                   : '이 문제는 오답 복습 목록에 포함되어 있습니다.'}
               </p>
@@ -157,7 +187,7 @@ export default function QuizCard({
               disabled={!hasNext}
               className={`soft-button-primary ${!hasNext ? 'cursor-not-allowed opacity-45' : ''}`}
             >
-              다음 문제
+              {primaryActionLabel}
             </button>
           </div>
         </div>

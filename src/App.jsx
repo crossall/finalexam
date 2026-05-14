@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import ModeSelector from './components/ModeSelector';
 import ProgressPanel from './components/ProgressPanel';
 import QuizCard from './components/QuizCard';
 import WrongAnswerList from './components/WrongAnswerList';
 import questions from './data/questions.json';
-import { getLiveAnswerState, normalizeAnswer } from './utils/answers';
+import { getLiveAnswerState, isAcceptedAnswer } from './utils/answers';
 
 const STORAGE_KEY = 'finalexam-memory-quiz-progress-v1';
 
@@ -70,13 +70,7 @@ export default function App() {
   const [activeQuestionId, setActiveQuestionId] = useState(questions[0]?.id ?? null);
   const [draftAnswer, setDraftAnswer] = useState('');
   const [isComposing, setIsComposing] = useState(false);
-  const [isAnswerLocked, setIsAnswerLocked] = useState(false);
-  const successLoggedRef = useRef(false);
-  const editedAnswerRef = useRef(false);
-  const lastEditedValueRef = useRef('');
-  const queuedNextQuestionIdRef = useRef(null);
-  const suppressNextEnterRef = useRef(false);
-  const enterGuardTimerRef = useRef(null);
+  const [submissionResult, setSubmissionResult] = useState(null);
 
   const wrongQuestions = questions.filter((question) => records[question.id]?.reviewNeeded);
   const visibleQuestions = mode === 'wrongOnly' ? wrongQuestions : questions;
@@ -85,18 +79,48 @@ export default function App() {
     ? visibleQuestions.findIndex((question) => question.id === currentQuestion.id)
     : -1;
   const currentRecord = currentQuestion ? records[currentQuestion.id] : createEmptyRecord();
-  const liveState = currentQuestion
-    ? isAnswerLocked
-      ? 'correct'
-      : isComposing && draftAnswer
-        ? 'composing'
-        : getLiveAnswerState(draftAnswer, currentQuestion)
-    : 'idle';
+  const isAnswerLocked = Boolean(submissionResult);
   const progressIndex = currentIndex >= 0 ? currentIndex : 0;
-  const hasNext =
-    isAnswerLocked && mode === 'wrongOnly'
-      ? true
-      : currentIndex >= 0 && currentIndex < visibleQuestions.length - 1;
+
+  const liveState = (() => {
+    if (!currentQuestion) {
+      return 'idle';
+    }
+
+    if (submissionResult) {
+      return submissionResult.status;
+    }
+
+    if (isComposing && draftAnswer) {
+      return 'composing';
+    }
+
+    const nextState = getLiveAnswerState(draftAnswer, currentQuestion);
+
+    if (nextState === 'correct') {
+      return 'matched';
+    }
+
+    if (nextState === 'incorrect') {
+      return 'mismatch';
+    }
+
+    return nextState;
+  })();
+
+  const primaryActionLabel = (() => {
+    if (!submissionResult) {
+      return '정답 확인';
+    }
+
+    if (mode === 'wrongOnly' && !submissionResult.nextQuestionId) {
+      return '복습 완료';
+    }
+
+    return submissionResult.nextQuestionId ? '다음 문제' : '완료';
+  })();
+
+  const hasPrimaryAction = Boolean(currentQuestion);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -104,17 +128,8 @@ export default function App() {
     }
   }, [records]);
 
-  useEffect(
-    () => () => {
-      if (enterGuardTimerRef.current !== null && typeof window !== 'undefined') {
-        window.clearTimeout(enterGuardTimerRef.current);
-      }
-    },
-    []
-  );
-
   useEffect(() => {
-    if (isAnswerLocked) {
+    if (submissionResult) {
       return;
     }
 
@@ -128,22 +143,13 @@ export default function App() {
     if (!visibleQuestions.some((question) => question.id === activeQuestionId)) {
       setActiveQuestionId(visibleQuestions[0].id);
     }
-  }, [activeQuestionId, isAnswerLocked, visibleQuestions]);
+  }, [activeQuestionId, submissionResult, visibleQuestions]);
 
   useEffect(() => {
     if (!currentQuestion) {
       setDraftAnswer('');
-      successLoggedRef.current = false;
-      editedAnswerRef.current = false;
-      lastEditedValueRef.current = '';
-      queuedNextQuestionIdRef.current = null;
-      suppressNextEnterRef.current = false;
-      if (enterGuardTimerRef.current !== null && typeof window !== 'undefined') {
-        window.clearTimeout(enterGuardTimerRef.current);
-        enterGuardTimerRef.current = null;
-      }
       setIsComposing(false);
-      setIsAnswerLocked(false);
+      setSubmissionResult(null);
       return;
     }
 
@@ -152,17 +158,8 @@ export default function App() {
       : '';
 
     setDraftAnswer(reviewSeed ?? '');
-    successLoggedRef.current = false;
-    editedAnswerRef.current = false;
-    lastEditedValueRef.current = reviewSeed ?? '';
-    queuedNextQuestionIdRef.current = null;
-    suppressNextEnterRef.current = false;
-    if (enterGuardTimerRef.current !== null && typeof window !== 'undefined') {
-      window.clearTimeout(enterGuardTimerRef.current);
-      enterGuardTimerRef.current = null;
-    }
     setIsComposing(false);
-    setIsAnswerLocked(false);
+    setSubmissionResult(null);
   }, [currentQuestion?.id, mode]);
 
   const commitAttempt = (questionId, status, answerText, options = {}) => {
@@ -198,89 +195,72 @@ export default function App() {
     });
   };
 
-  const finalizeCurrentAttempt = () => {
-    if (!currentQuestion || isAnswerLocked || successLoggedRef.current || !editedAnswerRef.current) {
-      return;
-    }
-
-    const attemptValue = draftAnswer || lastEditedValueRef.current;
-
-    if (!normalizeAnswer(attemptValue)) {
-      return;
-    }
-
-    commitAttempt(currentQuestion.id, 'wrong', attemptValue);
+  const updateReviewNeeded = (questionId, reviewNeeded) => {
+    setRecords((previous) => ({
+      ...previous,
+      [questionId]: {
+        ...(previous[questionId] ?? createEmptyRecord()),
+        reviewNeeded,
+        updatedAt: new Date().toISOString()
+      }
+    }));
   };
 
-  const handleModeChange = (nextMode) => {
-    finalizeCurrentAttempt();
-    setMode(nextMode);
+  const settleCurrentQuestion = () => {
+    if (!currentQuestion || !submissionResult) {
+      return;
+    }
+
+    if (submissionResult.status === 'correct' && submissionResult.shouldClearReview) {
+      updateReviewNeeded(currentQuestion.id, false);
+    }
   };
 
-  const guardImmediateEnterAfterLock = () => {
-    suppressNextEnterRef.current = true;
-
-    if (typeof window === 'undefined') {
-      suppressNextEnterRef.current = false;
-      return;
-    }
-
-    if (enterGuardTimerRef.current !== null) {
-      window.clearTimeout(enterGuardTimerRef.current);
-    }
-
-    enterGuardTimerRef.current = window.setTimeout(() => {
-      suppressNextEnterRef.current = false;
-      enterGuardTimerRef.current = null;
-    }, 0);
+  const moveToQuestion = (questionId) => {
+    settleCurrentQuestion();
+    setActiveQuestionId(questionId);
   };
 
-  const handleAnswerChange = (nextValue, composing = false) => {
-    if (!currentQuestion || isAnswerLocked) {
+  const submitCurrentAnswer = () => {
+    if (!currentQuestion || submissionResult) {
       return;
     }
 
-    setDraftAnswer(nextValue);
-    editedAnswerRef.current = true;
-    lastEditedValueRef.current = nextValue;
+    const submittedAnswer = draftAnswer;
+    const correct = isAcceptedAnswer(submittedAnswer, currentQuestion);
+    const nextQuestionId =
+      mode === 'wrongOnly'
+        ? getSiblingQuestionId(visibleQuestions, currentQuestion.id)
+        : visibleQuestions[currentIndex + 1]?.id ?? null;
 
-    if (composing) {
-      return;
-    }
-
-    if (successLoggedRef.current) {
-      return;
-    }
-
-    const nextState = getLiveAnswerState(nextValue, currentQuestion);
-
-    if (nextState === 'correct' && !successLoggedRef.current) {
-      queuedNextQuestionIdRef.current =
-        mode === 'wrongOnly' ? getSiblingQuestionId(visibleQuestions, currentQuestion.id) : null;
-      successLoggedRef.current = true;
-      guardImmediateEnterAfterLock();
-      setIsAnswerLocked(true);
-      commitAttempt(currentQuestion.id, 'correct', nextValue, {
-        clearReview: true
+    if (correct) {
+      commitAttempt(currentQuestion.id, 'correct', submittedAnswer, {
+        clearReview: false
       });
-    }
-  };
-
-  const handleCompositionStart = () => {
-    setIsComposing(true);
-  };
-
-  const handleCompositionEnd = (finalValue) => {
-    setIsComposing(false);
-    handleAnswerChange(finalValue);
-  };
-
-  const moveToQuestion = (nextQuestionId) => {
-    if (!isAnswerLocked) {
-      finalizeCurrentAttempt();
+    } else {
+      commitAttempt(currentQuestion.id, 'wrong', submittedAnswer);
     }
 
-    setActiveQuestionId(nextQuestionId);
+    setSubmissionResult({
+      status: correct ? 'correct' : 'incorrect',
+      submittedAnswer,
+      correctAnswer: currentQuestion.answer,
+      nextQuestionId,
+      shouldClearReview: correct && currentRecord.reviewNeeded
+    });
+  };
+
+  const handlePrimaryAction = () => {
+    if (!currentQuestion) {
+      return;
+    }
+
+    if (submissionResult) {
+      moveToQuestion(submissionResult.nextQuestionId ?? null);
+      return;
+    }
+
+    submitCurrentAnswer();
   };
 
   const handleMove = (offset) => {
@@ -295,22 +275,6 @@ export default function App() {
     }
   };
 
-  const handleNext = () => {
-    if (!currentQuestion) {
-      return;
-    }
-
-    if (isAnswerLocked) {
-      const nextQuestionId =
-        mode === 'wrongOnly' ? queuedNextQuestionIdRef.current : visibleQuestions[currentIndex + 1]?.id ?? null;
-
-      moveToQuestion(nextQuestionId ?? null);
-      return;
-    }
-
-    handleMove(1);
-  };
-
   const handleReset = () => {
     if (!window.confirm('학습 기록을 모두 초기화할까요?')) {
       return;
@@ -321,17 +285,8 @@ export default function App() {
     setMode('all');
     setActiveQuestionId(questions[0]?.id ?? null);
     setDraftAnswer('');
-    successLoggedRef.current = false;
-    editedAnswerRef.current = false;
-    lastEditedValueRef.current = '';
-    queuedNextQuestionIdRef.current = null;
-    suppressNextEnterRef.current = false;
-    if (enterGuardTimerRef.current !== null && typeof window !== 'undefined') {
-      window.clearTimeout(enterGuardTimerRef.current);
-      enterGuardTimerRef.current = null;
-    }
     setIsComposing(false);
-    setIsAnswerLocked(false);
+    setSubmissionResult(null);
   };
 
   const solvedCount = questions.filter((question) => records[question.id]?.solved).length;
@@ -354,7 +309,14 @@ export default function App() {
         onReset={handleReset}
       />
 
-      <ModeSelector mode={mode} onChange={handleModeChange} wrongCount={wrongCount} />
+      <ModeSelector
+        mode={mode}
+        onChange={(nextMode) => {
+          settleCurrentQuestion();
+          setMode(nextMode);
+        }}
+        wrongCount={wrongCount}
+      />
 
       {currentQuestion ? (
         <QuizCard
@@ -362,35 +324,50 @@ export default function App() {
           value={draftAnswer}
           liveState={liveState}
           record={currentRecord}
+          submissionResult={submissionResult}
           isAnswerLocked={isAnswerLocked}
           hasPrev={currentIndex > 0}
-          hasNext={hasNext}
+          hasNext={hasPrimaryAction}
+          primaryActionLabel={primaryActionLabel}
           mode={mode}
-          onChange={handleAnswerChange}
-          onCompositionStart={handleCompositionStart}
-          onCompositionEnd={handleCompositionEnd}
+          onChange={(nextValue, composing = false) => {
+            if (submissionResult) {
+              return;
+            }
+
+            setDraftAnswer(nextValue);
+
+            if (composing) {
+              return;
+            }
+          }}
+          onCompositionStart={() => setIsComposing(true)}
+          onCompositionEnd={(finalValue) => {
+            setIsComposing(false);
+            if (!submissionResult) {
+              setDraftAnswer(finalValue);
+            }
+          }}
           onPrev={() => handleMove(-1)}
-          onNext={handleNext}
+          onNext={handlePrimaryAction}
           onEnter={() => {
             if (isComposing) {
               return;
             }
 
-            if (suppressNextEnterRef.current) {
-              return;
-            }
-
-            if (isAnswerLocked) {
-              handleNext();
-            }
+            handlePrimaryAction();
           }}
         />
       ) : (
         <section className="glass-panel p-10 text-center">
           <p className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-400">All Clear</p>
-          <h2 className="mt-3 text-3xl font-black text-ink">오답 복습 목록이 비었습니다.</h2>
+          <h2 className="mt-3 text-3xl font-black text-ink">
+            {mode === 'wrongOnly' ? '오답 복습 목록이 비었습니다.' : '전체 문제 확인이 끝났습니다.'}
+          </h2>
           <p className="mt-3 text-slate-500">
-            전체 학습 모드로 돌아가 새로운 문제를 풀거나, 다시 틀린 문제가 생기면 여기에서 복습할 수 있습니다.
+            {mode === 'wrongOnly'
+              ? '전체 학습 모드로 돌아가 새로운 문제를 풀거나, 다시 틀린 문제가 생기면 여기에서 복습할 수 있습니다.'
+              : '다시 처음부터 학습하거나 오답 복습 모드로 전환해 틀린 문제만 다시 확인할 수 있습니다.'}
           </p>
           <button type="button" onClick={() => setMode('all')} className="soft-button-primary mt-6">
             전체 학습으로 이동
